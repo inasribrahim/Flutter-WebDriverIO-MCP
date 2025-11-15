@@ -1,0 +1,21 @@
+{
+  "platformName": "iOS",
+  "appium:platformVersion": "17.0",
+  "appium:deviceName": "iPhone 15",
+  "appium:automationName": "XCUITest",
+  "appium:bundleId": "com.example.flutter_app",
+  "appium:noReset": false,
+  "appium:fullReset": false,
+  "appium:newCommandTimeout": 300,
+  "appium:commandTimeouts": {
+    "implicit": 10000
+  },
+  "appium:wdaLaunchTimeout": 120000,
+  "appium:wdaConnectionTimeout": 120000,
+  "appium:includeDeviceCapsToSessionInfo": true,
+  "appium:showIOSLog": true,
+  "appium:clearSystemFiles": false,
+  "appium:shouldUseSingletonTestManager": false,
+  "appium:maxTypingFrequency": 60,
+  "appium:simpleIsVisibleCheck": true
+}

@@ -1,0 +1,434 @@
+# iOS Flutter Automation CI/CD Pipeline
+name: iOS Flutter Automation
+
+# Trigger events
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - login
+        - smoke
+        - regression
+      device_type:
+        description: 'iOS Device Type'
+        required: true
+        default: 'iPhone 15'
+        type: choice
+        options:
+        - iPhone 15
+        - iPhone 14
+        - iPhone 13
+        - iPad Pro
+      ios_version:
+        description: 'iOS Version'
+        required: true
+        default: '17.2'
+        type: choice
+        options:
+        - '17.2'
+        - '16.4'
+        - '15.5'
+
+# Environment variables
+env:
+  FLUTTER_VERSION: "3.19.0"
+  NODE_VERSION: "20"
+  APPIUM_VERSION: "2.22.0"
+  XCODE_VERSION: "15.2"
+  IOS_SIMULATOR_TIMEOUT: 600
+  APPIUM_PORT: 4723
+
+jobs:
+  ios-flutter-tests:
+    name: iOS Flutter Tests
+    runs-on: macos-14
+    timeout-minutes: 60
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        test-suite: 
+          - { name: "login-test", script: "ios/ios-flutter-test-runner.js", description: "iOS Login Tests" }
+          - { name: "interaction-test", script: "tests/flutter-login-interaction.js", description: "Flutter Interaction Tests" }
+
+    steps:
+      # 1. Repository Setup
+      - name: 🚀 Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Environment Setup
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 🍎 Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: 📱 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      # 3. Dependencies Installation
+      - name: 📦 Install Node.js Dependencies
+        run: |
+          echo "📦 Installing main dependencies..."
+          
+          # Check if package-lock.json exists, if not create it
+          if [ ! -f "package-lock.json" ]; then
+            echo "⚠️ package-lock.json not found, generating..."
+            npm install
+          else
+            npm ci
+          fi
+          
+          echo "📦 Installing iOS-specific dependencies..."
+          if [ -d "ios" ] && [ -f "ios/package.json" ]; then
+            cd ios
+            if [ ! -f "package-lock.json" ]; then
+              echo "⚠️ iOS package-lock.json not found, generating..."
+              npm install
+            else
+              npm ci
+            fi
+            cd ..
+          fi
+          
+          echo "✅ Dependencies installed successfully"
+
+      - name: 🔧 Install Appium & Drivers
+        run: |
+          echo "🔧 Installing Appium globally..."
+          npm install -g appium@${{ env.APPIUM_VERSION }}
+          npm install -g @appium/doctor
+          
+          echo "🔧 Installing iOS drivers..."
+          appium driver install xcuitest
+          appium driver install flutter
+          
+          echo "🔍 Listing installed drivers..."
+          appium driver list
+          
+          echo "✅ Appium setup completed"
+
+      # 4. iOS Simulator Setup
+      - name: 📱 Setup iOS Simulator
+        run: |
+          DEVICE_NAME="${{ github.event.inputs.device_type || 'iPhone 15' }}"
+          IOS_VERSION="${{ github.event.inputs.ios_version || '17.2' }}"
+          
+          echo "📱 Setting up iOS Simulator: $DEVICE_NAME (iOS $IOS_VERSION)"
+          
+          # Shutdown all simulators
+          xcrun simctl shutdown all
+          
+          # List available devices
+          echo "📋 Available simulators:"
+          xcrun simctl list devices available
+          
+          # Find simulator UDID
+          UDID=$(xcrun simctl list devices available | grep "$DEVICE_NAME" | grep "$IOS_VERSION" | head -n 1 | grep -o '([0-9A-F\-]*)' | tr -d '()')
+          
+          if [ -z "$UDID" ]; then
+            echo "❌ Simulator not found: $DEVICE_NAME (iOS $IOS_VERSION)"
+            echo "📋 Available devices:"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          
+          echo "✅ Found simulator UDID: $UDID"
+          echo "SIMULATOR_UDID=$UDID" >> $GITHUB_ENV
+          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
+          echo "IOS_VERSION=$IOS_VERSION" >> $GITHUB_ENV
+          
+          # Boot simulator
+          echo "🚀 Booting simulator..."
+          xcrun simctl boot "$UDID"
+          
+          # Wait for boot
+          echo "⏳ Waiting for simulator boot..."
+          xcrun simctl bootstatus "$UDID" -b
+          
+          echo "✅ iOS Simulator ready"
+
+      # 5. Appium Server Setup
+      - name: 🚀 Start Appium Server
+        run: |
+          echo "🚀 Starting Appium server on port ${{ env.APPIUM_PORT }}..."
+          
+          # Start Appium in background
+          appium server --port ${{ env.APPIUM_PORT }} --log-level info --log ./appium.log &
+          APPIUM_PID=$!
+          echo "APPIUM_PID=$APPIUM_PID" >> $GITHUB_ENV
+          
+          # Wait for server to start
+          echo "⏳ Waiting for Appium server..."
+          sleep 15
+          
+          # Check if server is running
+          for i in {1..10}; do
+            if curl -f http://localhost:${{ env.APPIUM_PORT }}/status; then
+              echo "✅ Appium server started successfully"
+              break
+            fi
+            echo "⏳ Attempt $i: Waiting for Appium server..."
+            sleep 3
+          done
+          
+          # Verify server status
+          curl -f http://localhost:${{ env.APPIUM_PORT }}/status || (echo "❌ Appium server failed to start" && cat ./appium.log && exit 1)
+
+      # 6. Verify Appium Setup
+      - name: 🔍 Verify Appium Configuration
+        run: |
+          echo "🔍 Running Appium Doctor for iOS..."
+          appium doctor --ios || echo "⚠️ Some Appium Doctor checks failed, but continuing..."
+          
+          echo "🔍 Checking iOS capabilities..."
+          cat > test-capabilities.json << EOF
+          {
+            "platformName": "iOS",
+            "appium:platformVersion": "$IOS_VERSION",
+            "appium:deviceName": "$DEVICE_NAME",
+            "appium:udid": "$SIMULATOR_UDID",
+            "appium:automationName": "XCUITest",
+            "appium:noReset": false,
+            "appium:fullReset": false,
+            "appium:newCommandTimeout": 300
+          }
+          EOF
+          
+          echo "✅ Test capabilities created"
+
+      # 7. Run iOS Flutter Tests
+      - name: 🧪 Run iOS Flutter Tests - ${{ matrix.test-suite.description }}
+        run: |
+          echo "🧪 Running test suite: ${{ matrix.test-suite.description }}"
+          echo "📝 Test script: ${{ matrix.test-suite.script }}"
+          
+          # Set test environment variables
+          export TEST_ENVIRONMENT="${{ github.event.inputs.environment || 'staging' }}"
+          export DEVICE_UDID="$SIMULATOR_UDID"
+          export APPIUM_SERVER="http://localhost:${{ env.APPIUM_PORT }}"
+          
+          # Create results directory
+          mkdir -p allure-results screenshots logs
+          
+          # Create dummy files to ensure artifacts are always created
+          echo '{"test":"placeholder"}' > allure-results/test-placeholder.json
+          echo "Test execution started at $(date)" > logs/test-execution.log
+          
+          # Check if test script exists
+          if [[ "${{ matrix.test-suite.script }}" == *"ios-flutter-test-runner.js" ]]; then
+            if [ -f "ios/ios-flutter-test-runner.js" ]; then
+              echo "🎯 Running iOS-specific test runner..."
+              cd ios
+              node ios-flutter-test-runner.js single testuser testpass123 2>&1 | tee ../logs/ios-test.log
+              cd ..
+            else
+              echo "❌ iOS test runner not found: ios/ios-flutter-test-runner.js"
+              echo "Available files in ios/:"
+              ls -la ios/ 2>/dev/null || echo "iOS directory not found"
+            fi
+          else
+            if [ -f "${{ matrix.test-suite.script }}" ]; then
+              echo "🎯 Running general Flutter test..."
+              node ${{ matrix.test-suite.script }} 2>&1 | tee logs/flutter-test.log
+            else
+              echo "❌ Test script not found: ${{ matrix.test-suite.script }}"
+              echo "Available files in tests/:"
+              ls -la tests/ 2>/dev/null || echo "Tests directory not found"
+            fi
+          fi
+          
+          # Create a basic screenshot if none exist
+          if [ ! "$(ls -A screenshots 2>/dev/null)" ]; then
+            echo "📸 Creating placeholder screenshot..."
+            echo "No screenshots generated - test may have failed or not reached screenshot stage" > screenshots/no-screenshots.txt
+          fi
+          
+        continue-on-error: true
+        timeout-minutes: 20
+
+      # 8. Capture Test Results
+      - name: 📊 Capture Test Results
+        if: always()
+        run: |
+          echo "📊 Capturing test results..."
+          
+          # Create comprehensive test summary
+          cat > test-summary.md << EOF
+          # iOS Flutter Test Results
+          
+          ## Test Configuration
+          - **Device**: $DEVICE_NAME
+          - **iOS Version**: $IOS_VERSION
+          - **Test Suite**: ${{ matrix.test-suite.description }}
+          - **Date**: $(date)
+          - **Branch**: ${{ github.ref_name }}
+          - **Commit**: ${{ github.sha }}
+          
+          ## Test Environment
+          - **Flutter Version**: ${{ env.FLUTTER_VERSION }}
+          - **Appium Version**: ${{ env.APPIUM_VERSION }}
+          - **Xcode Version**: ${{ env.XCODE_VERSION }}
+          
+          ## Artifacts
+          - Allure Results: \`allure-results/\`
+          - Screenshots: \`screenshots/\`
+          - Logs: \`logs/\`
+          EOF
+          
+          # List generated files
+          echo "📁 Generated test artifacts:"
+          find . -name "*.json" -o -name "*.png" -o -name "*.log" | grep -E "(allure-results|screenshots|logs)" | head -20
+
+      # 9. Upload Artifacts
+      - name: 📁 Upload Test Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-test-results-${{ matrix.test-suite.name }}-${{ github.run_number }}
+          path: |
+            allure-results
+            logs
+            test-summary.md
+            appium.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: 📁 Upload Screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-screenshots-${{ matrix.test-suite.name }}-${{ github.run_number }}
+          path: |
+            screenshots
+          if-no-files-found: warn
+          retention-days: 15
+
+      # 10. Cleanup
+      - name: 🧹 Cleanup
+        if: always()
+        run: |
+          echo "🧹 Starting cleanup..."
+          
+          # Stop Appium server
+          if [ -n "$APPIUM_PID" ]; then
+            echo "⏹️ Stopping Appium server (PID: $APPIUM_PID)..."
+            kill $APPIUM_PID 2>/dev/null || echo "⚠️ Appium server already stopped"
+          fi
+          
+          # Shutdown simulator
+          if [ -n "$SIMULATOR_UDID" ]; then
+            echo "⏹️ Shutting down simulator..."
+            xcrun simctl shutdown "$SIMULATOR_UDID" 2>/dev/null || echo "⚠️ Simulator already shutdown"
+          fi
+          
+          # Show final logs
+          if [ -f "appium.log" ]; then
+            echo "📝 Final Appium log (last 50 lines):"
+            tail -50 appium.log
+          fi
+          
+          echo "✅ Cleanup completed"
+
+  # Generate Test Report
+  generate-report:
+    name: 📊 Generate Test Report
+    runs-on: ubuntu-latest
+    needs: ios-flutter-tests
+    if: always()
+    
+    steps:
+      - name: 🚀 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: 📥 Download Test Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ios-test-results-*
+          path: test-results
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: 🔍 Check Downloaded Artifacts
+        run: |
+          echo "📁 Checking downloaded artifacts..."
+          if [ -d "test-results" ]; then
+            echo "✅ Test results directory found"
+            find test-results -type f | head -20
+          else
+            echo "⚠️ No test results found, creating placeholder"
+            mkdir -p test-results/allure-results
+            echo '{"name":"placeholder","status":"broken"}' > test-results/allure-results/placeholder.json
+          fi
+
+      - name: 📊 Generate Allure Report
+        uses: simple-elf/allure-report-action@master
+        if: always()
+        with:
+          allure_results: test-results/allure-results
+          allure_report: allure-report
+          allure_history: allure-history
+          keep_reports: 20
+        continue-on-error: true
+
+      - name: 🚀 Deploy Report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+          destination_dir: ios-test-reports
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+        continue-on-error: true
+
+      - name: 📝 Create Test Summary
+        if: always()
+        run: |
+          echo "## 📱 iOS Flutter Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow**: iOS Flutter Automation" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Repository Pages URL
+          REPO_OWNER=$(echo ${{ github.repository }} | cut -d'/' -f1)
+          REPO_NAME=$(echo ${{ github.repository }} | cut -d'/' -f2)
+          echo "- **Test Report**: [View Allure Report](https://${REPO_OWNER}.github.io/${REPO_NAME}/ios-test-reports)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "test-results" ]; then
+            echo "- **Artifacts Found**: ✅" >> $GITHUB_STEP_SUMMARY
+            echo "- **Screenshots**: $(find test-results -name "*.png" -o -name "*.txt" | wc -l)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Test Files**: $(find test-results -name "*.json" | wc -l)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Log Files**: $(find test-results -name "*.log" | wc -l)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Artifacts Found**: ❌" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Workflow File](https://github.com/${{ github.repository }}/blob/main/.github/workflows/ios-flutter-automation.yml)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Repository](https://github.com/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY

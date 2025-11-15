@@ -1,0 +1,30 @@
+{
+  "appium:platformName": "Android",
+  "appium:platformVersion": "16",
+  "appium:deviceName": "Medium_Phone_API_36",
+  "appium:automationName": "Flutter",
+  "appium:udid": "emulator-5554",
+  "appium:avdLaunchTimeout": 300000,
+  "appium:avdReadyTimeout": 300000,
+  "appium:androidInstallTimeout": 90000,
+  "appium:adbExecTimeout": 20000,
+  "appium:systemPort": 8200,
+  "appium:chromeDriverPort": 8000,
+  "appium:newCommandTimeout": 300,
+  "appium:settings": {
+    "waitForIdleTimeout": 100,
+    "waitForSelectorTimeout": 30000
+  },
+  "appium:appPackage": "com.example.the_app_flutter",
+  "appium:appActivity": "com.example.the_app_flutter.MainActivity",
+  "appium:app": "",
+  "appium:noReset": true,
+  "appium:fullReset": false,
+  "appium:unicodeKeyboard": true,
+  "appium:resetKeyboard": true,
+  "appium:flutterSystemPort": 9999,
+  "appium:flutterEnableObservatory": true,
+  "appium:isolateId": "",
+  "appium:skipPortForward": false,
+  "appium:forwardingPort": 4724
+}

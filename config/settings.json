@@ -1,0 +1,8 @@
+{
+    "android.home": "C:\\Users\\moham\\AppData\\Local\\Android\\Sdk",
+    "android.sdk.path": "C:\\Users\\moham\\AppData\\Local\\Android\\Sdk",
+    "android.emulator.path": "C:\\Users\\moham\\AppData\\Local\\Android\\Sdk\\emulator\\emulator.exe",
+    "emulator.emulatorPath": "C:\\Users\\moham\\AppData\\Local\\Android\\Sdk\\emulator",
+    "emulator.emulatorPathWindows": "C:\\Users\\moham\\AppData\\Local\\Android\\Sdk\\emulator",
+    "emulator.androidColdBoot": true
+}
