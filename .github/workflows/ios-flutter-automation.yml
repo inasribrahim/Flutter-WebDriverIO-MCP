@@ -89,19 +89,32 @@ jobs:
       - name: 📦 Install Node.js Dependencies
         run: |
           echo "📦 Installing main dependencies..."
+          echo "📍 Current directory: $(pwd)"
+          echo "📋 Files in current directory:"
+          ls -la
           
-          # Ensure package-lock.json exists in root
-          if [ ! -f "package-lock.json" ]; then
-            echo "⚠️ Root package-lock.json not found, generating..."
-            npm install --package-lock-only
-            npm install
+          # Check for lock files in order of preference
+          if [ -f "package-lock.json" ]; then
+            echo "✅ Found package-lock.json, using npm ci"
+            npm ci
+          elif [ -f "yarn.lock" ]; then
+            echo "✅ Found yarn.lock, using yarn install"
+            yarn install --frozen-lockfile
+          elif [ -f "npm-shrinkwrap.json" ]; then
+            echo "✅ Found npm-shrinkwrap.json, using npm ci"
+            npm ci
           else
+            echo "⚠️ No lock file found, generating package-lock.json..."
+            npm install --package-lock-only
+            echo "📦 Installing dependencies with generated lock file..."
             npm ci
           fi
           
-          # Create screenshots directory if it doesn't exist
-          mkdir -p screenshots
-          echo "📸 Screenshots directory created"
+          # Create required directories
+          mkdir -p screenshots allure-results test-results
+          echo "📸 Created required directories: screenshots, allure-results, test-results"
+          
+          echo "✅ Root dependencies installation completed"
           
           echo "📦 Installing iOS-specific dependencies..."
           if [ -d "ios" ] && [ -f "ios/package.json" ]; then
