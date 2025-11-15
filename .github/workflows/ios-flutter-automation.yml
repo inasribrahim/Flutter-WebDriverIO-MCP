@@ -43,7 +43,7 @@ on:
 env:
   FLUTTER_VERSION: "3.19.0"
   NODE_VERSION: "20"
-  APPIUM_VERSION: "2.22.0"
+  APPIUM_VERSION: "2.19.0"
   XCODE_VERSION: "15.2"
   IOS_SIMULATOR_TIMEOUT: 600
   APPIUM_PORT: 4723
@@ -133,7 +133,19 @@ jobs:
       - name: 🔧 Install Appium & Drivers
         run: |
           echo "🔧 Installing Appium globally..."
-          npm install -g appium@${{ env.APPIUM_VERSION }}
+          echo "📦 Appium version: ${{ env.APPIUM_VERSION }}"
+          
+          # Install Appium with specific version (with fallback)
+          if ! npm install -g appium@${{ env.APPIUM_VERSION }}; then
+            echo "⚠️ Failed to install Appium ${{ env.APPIUM_VERSION }}, trying latest 2.x..."
+            npm install -g appium@2.19.0 || npm install -g appium@latest
+          fi
+          
+          # Verify Appium installation
+          echo "✅ Verifying Appium installation..."
+          appium --version
+          
+          # Install Appium Doctor for diagnostics
           npm install -g @appium/doctor
           
           echo "🔧 Installing iOS drivers..."
@@ -142,6 +154,9 @@ jobs:
           
           echo "🔍 Listing installed drivers..."
           appium driver list
+          
+          echo "🩺 Running Appium Doctor for iOS..."
+          appium-doctor --ios || echo "⚠️ Some Appium Doctor checks failed, but continuing..."
           
           echo "✅ Appium setup completed"
 
