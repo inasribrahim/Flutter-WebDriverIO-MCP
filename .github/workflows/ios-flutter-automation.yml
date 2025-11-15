@@ -90,13 +90,18 @@ jobs:
         run: |
           echo "📦 Installing main dependencies..."
           
-          # Check if package-lock.json exists, if not create it
+          # Ensure package-lock.json exists in root
           if [ ! -f "package-lock.json" ]; then
-            echo "⚠️ package-lock.json not found, generating..."
+            echo "⚠️ Root package-lock.json not found, generating..."
+            npm install --package-lock-only
             npm install
           else
             npm ci
           fi
+          
+          # Create screenshots directory if it doesn't exist
+          mkdir -p screenshots
+          echo "📸 Screenshots directory created"
           
           echo "📦 Installing iOS-specific dependencies..."
           if [ -d "ios" ] && [ -f "ios/package.json" ]; then
@@ -363,6 +368,13 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: 🔧 Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global init.defaultBranch main
+          echo "✅ Git configuration completed"
+
       - name: 📥 Download Test Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -403,7 +415,10 @@ jobs:
           destination_dir: ios-test-reports
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
+          force_orphan: true
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📝 Create Test Summary
         if: always()
